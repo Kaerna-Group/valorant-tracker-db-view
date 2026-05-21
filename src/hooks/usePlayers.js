@@ -37,6 +37,39 @@ function matchesSearch(player, searchQuery) {
     .some((value) => normalizeSearchValue(value).includes(search))
 }
 
+function getSearchRank(player, searchQuery) {
+  const search = normalizeSearchValue(searchQuery)
+  if (!search) return 0
+
+  const nickname = normalizeSearchValue(player.nickname)
+  const discriminator = normalizeSearchValue(player.discriminator)
+  const fullName = normalizeSearchValue(`${player.nickname || ''}#${player.discriminator || ''}`)
+  const spacedName = normalizeSearchValue(`${player.nickname || ''} ${player.discriminator || ''}`)
+
+  if (fullName === search || spacedName === search) return 0
+  if (nickname === search) return 1
+  if (fullName.startsWith(search) || spacedName.startsWith(search)) return 2
+  if (nickname.startsWith(search)) return 3
+  if (discriminator === search) return 4
+  return 5
+}
+
+function sortPlayers(players, searchQuery) {
+  return [...players].sort((a, b) => {
+    const rankDifference = getSearchRank(a, searchQuery) - getSearchRank(b, searchQuery)
+    if (rankDifference !== 0) return rankDifference
+
+    const matchesDifference = (b.matchesCount || 0) - (a.matchesCount || 0)
+    if (matchesDifference !== 0) return matchesDifference
+
+    return `${a.nickname}#${a.discriminator}`.localeCompare(
+      `${b.nickname}#${b.discriminator}`,
+      undefined,
+      { sensitivity: 'base' }
+    )
+  })
+}
+
 function normalizeSearchValue(value) {
   return String(value || '')
     .trim()
@@ -135,15 +168,16 @@ export function usePlayers() {
           }
         })
       )
+      const sortedPlayers = sortPlayers(processedPlayers, searchQuery)
 
       const nextPageCursor = isSearch
         ? null
         : snapshot.docs[snapshot.docs.length - 1] ?? null
 
       if (append) {
-        setPlayers(prev => [...prev, ...processedPlayers])
+        setPlayers(prev => sortPlayers([...prev, ...sortedPlayers], searchQuery))
       } else {
-        setPlayers(processedPlayers)
+        setPlayers(sortedPlayers)
       }
 
       setNextCursor(!isSearch && snapshot.docs.length === pageLimit ? nextPageCursor : null)
