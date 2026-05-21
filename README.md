@@ -1,13 +1,13 @@
 # Player Match Search
 
-A React application for searching and viewing player matches using Supabase.
+A React application for searching and viewing player matches using Firebase Cloud Firestore.
 
 ## Features
 
 - Search players by nickname or discriminator
 - View player match history
+- Read Firestore collections: `players`, `matches`, `matchPlayers`
 - Responsive design with Tailwind CSS
-- Optimized rendering with React.memo
 - GitHub Pages deployment
 
 ## Setup
@@ -19,8 +19,12 @@ npm install
 
 2. Create `.env` file:
 ```env
-VITE_SUPABASE_URL=your_supabase_url
-VITE_SUPABASE_ANON_KEY=your_supabase_anon_key
+VITE_FIREBASE_API_KEY=your_firebase_api_key
+VITE_FIREBASE_AUTH_DOMAIN=your_project.firebaseapp.com
+VITE_FIREBASE_PROJECT_ID=your_project_id
+VITE_FIREBASE_STORAGE_BUCKET=your_project.appspot.com
+VITE_FIREBASE_MESSAGING_SENDER_ID=your_sender_id
+VITE_FIREBASE_APP_ID=your_app_id
 ```
 
 3. Run development server:
@@ -28,36 +32,46 @@ VITE_SUPABASE_ANON_KEY=your_supabase_anon_key
 npm run dev
 ```
 
+## Firestore Data
+
+The app expects these collections:
+
+```text
+players
+matches
+matchPlayers
+```
+
+Player history is read from:
+
+```js
+matchPlayers.where("playerId", "==", playerId).orderBy("dateOfPlay", "desc")
+```
+
+If Firebase asks for an index, create the suggested composite index for `matchPlayers`:
+
+- `playerId` ascending
+- `dateOfPlay` descending
+
 ## GitHub Pages Deployment
 
 The project is configured for automatic deployment to GitHub Pages via GitHub Actions.
 
-### Setup Instructions:
+### Setup Instructions
 
-1. **Enable GitHub Pages (IMPORTANT - Do this first!):**
-   - Go to your repository on GitHub
-   - Click **Settings** → **Pages** (in the left sidebar)
-   - Under **"Source"**, select **"GitHub Actions"** (NOT "Deploy from a branch")
-   - If you don't see "GitHub Actions" option, make sure you have admin access to the repository
-   - Save the settings
+1. Enable GitHub Pages:
+   - Go to repository Settings -> Pages
+   - Under Source, select GitHub Actions
 
-2. **Add Secrets:**
-   - Go to Settings → Secrets and variables → Actions
-   - Add the following secrets:
-     - `VITE_SUPABASE_URL` - Your Supabase project URL
-     - `VITE_SUPABASE_ANON_KEY` - Your Supabase anonymous key
+2. Add Actions secrets:
+   - `VITE_FIREBASE_API_KEY`
+   - `VITE_FIREBASE_AUTH_DOMAIN`
+   - `VITE_FIREBASE_PROJECT_ID`
+   - `VITE_FIREBASE_STORAGE_BUCKET`
+   - `VITE_FIREBASE_MESSAGING_SENDER_ID`
+   - `VITE_FIREBASE_APP_ID`
 
-3. **Deploy:**
-   - Push to `main` or `master` branch
-   - The workflow will automatically build and deploy to GitHub Pages
-   - Your site will be available at: `https://{username}.github.io/{repo-name}/`
-
-### Manual Deployment:
-
-You can also trigger deployment manually:
-- Go to Actions tab
-- Select "Build and Deploy to GitHub Pages"
-- Click "Run workflow"
+3. Push to `main` or `master`.
 
 ## Build
 

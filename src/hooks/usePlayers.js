@@ -1,19 +1,73 @@
 import { useState, useCallback } from 'react'
-import { supabase } from '../lib/supabase'
+import {
+  collection,
+  getCountFromServer,
+  getDocs,
+  limit as limitQuery,
+  orderBy,
+  query,
+  startAfter,
+  where
+} from 'firebase/firestore'
+import { db } from '../lib/firebase'
+
+const SEARCH_PAGE_SIZE = 500
+const SEARCH_SCAN_LIMIT = 20000
+
+async function getMatchesCount(playerId) {
+  const snapshot = await getCountFromServer(
+    query(collection(db, 'matchPlayers'), where('playerId', '==', playerId))
+  )
+
+  return snapshot.data().count
+}
+
+function matchesSearch(player, searchQuery) {
+  const search = normalizeSearchValue(searchQuery)
+  if (!search) return true
+
+  return [
+    player.nickname,
+    player.discriminator,
+    `${player.nickname || ''}#${player.discriminator || ''}`,
+    `${player.nickname || ''} ${player.discriminator || ''}`,
+    player.profileUrl
+  ]
+    .filter(Boolean)
+    .some((value) => normalizeSearchValue(value).includes(search))
+}
+
+function normalizeSearchValue(value) {
+  return String(value || '')
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, '')
+    .replace(/^#/, '')
+}
+
+function mapPlayerDoc(doc) {
+  const data = doc.data()
+  return {
+    id: data.playerId || doc.id,
+    nickname: data.nickname || '',
+    discriminator: data.discriminator || '',
+    profileUrl: data.profileUrl || ''
+  }
+}
 
 export function usePlayers() {
   const [players, setPlayers] = useState([])
-  const [nextAfterId, setNextAfterId] = useState(null)
+  const [nextCursor, setNextCursor] = useState(null)
   const [loading, setLoading] = useState(false)
   const [loadingMore, setLoadingMore] = useState(false)
   const [error, setError] = useState(null)
   const [currentSearch, setCurrentSearch] = useState('')
 
-  const searchPlayers = useCallback(async (searchQuery = '', afterId = null, limit = 300, append = false) => {
+  const searchPlayers = useCallback(async (searchQuery = '', afterCursor = null, limit = 300, append = false) => {
     if (!append) {
       setLoading(true)
       setPlayers([])
-      setNextAfterId(null)
+      setNextCursor(null)
       setCurrentSearch(searchQuery)
     } else {
       setLoadingMore(true)
@@ -22,24 +76,69 @@ export function usePlayers() {
     setError(null)
     
     try {
-      const { data, error: rpcError } = await supabase.rpc('get_players_page', {
-        p_search: searchQuery.trim() || null,
-        p_after_id: afterId,
-        p_limit: limit
-      })
+      const isSearch = Boolean(searchQuery.trim())
+      const pageLimit = isSearch ? SEARCH_PAGE_SIZE : limit
+      const playersRef = collection(db, 'players')
+      const constraints = [orderBy('nickname'), limitQuery(pageLimit)]
 
-      if (rpcError) throw rpcError
+      if (afterCursor) {
+        constraints.splice(1, 0, startAfter(afterCursor))
+      }
 
-      const items = data?.items || []
-      const nextCursor = data?.next_after_id ?? null
+      let snapshot = await getDocs(query(playersRef, ...constraints))
+      const items = []
+      let scannedCount = 0
+      let lastVisibleDoc = snapshot.docs[snapshot.docs.length - 1] ?? null
 
-      const processedPlayers = items.map(player => ({
-        id: player.id,
-        nickname: player.nickname,
-        discriminator: player.discriminator,
-        profileUrl: player.profileUrl,
-        matchesCount: player.matchesCount || 0
-      }))
+      while (isSearch) {
+        scannedCount += snapshot.docs.length
+
+        const matchedPlayers = snapshot.docs
+          .map(mapPlayerDoc)
+          .filter((player) => matchesSearch(player, searchQuery))
+
+        items.push(...matchedPlayers)
+
+        if (
+          items.length >= limit ||
+          snapshot.docs.length < pageLimit ||
+          scannedCount >= SEARCH_SCAN_LIMIT
+        ) {
+          break
+        }
+
+        snapshot = await getDocs(
+          query(playersRef, orderBy('nickname'), startAfter(lastVisibleDoc), limitQuery(pageLimit))
+        )
+        lastVisibleDoc = snapshot.docs[snapshot.docs.length - 1] ?? null
+      }
+
+      if (!isSearch) {
+        items.push(...snapshot.docs.map(mapPlayerDoc))
+      }
+
+      const limitedItems = items.slice(0, limit)
+
+      const processedPlayers = await Promise.all(
+        limitedItems.map(async (player) => {
+          try {
+            return {
+              ...player,
+              matchesCount: await getMatchesCount(player.id)
+            }
+          } catch (countError) {
+            console.warn(`Failed to count matches for player ${player.id}:`, countError)
+            return {
+              ...player,
+              matchesCount: 0
+            }
+          }
+        })
+      )
+
+      const nextPageCursor = isSearch
+        ? null
+        : snapshot.docs[snapshot.docs.length - 1] ?? null
 
       if (append) {
         setPlayers(prev => [...prev, ...processedPlayers])
@@ -47,7 +146,7 @@ export function usePlayers() {
         setPlayers(processedPlayers)
       }
 
-      setNextAfterId(nextCursor)
+      setNextCursor(!isSearch && snapshot.docs.length === pageLimit ? nextPageCursor : null)
     } catch (err) {
       console.error('Error searching players:', err)
       setError(err.message)
@@ -61,12 +160,12 @@ export function usePlayers() {
   }, [])
 
   const loadMore = useCallback(() => {
-    if (nextAfterId !== null && !loading && !loadingMore) {
-      searchPlayers(currentSearch, nextAfterId, 50, true)
+    if (nextCursor !== null && !loading && !loadingMore) {
+      searchPlayers(currentSearch, nextCursor, 50, true)
     }
-  }, [nextAfterId, currentSearch, loading, loadingMore, searchPlayers])
+  }, [nextCursor, currentSearch, loading, loadingMore, searchPlayers])
 
-  const hasMore = nextAfterId !== null
+  const hasMore = nextCursor !== null
 
   return {
     players,

@@ -6,15 +6,10 @@ import MatchModal from '../components/MatchModal'
 
 function PlayerSearchPage() {
   const [searchQuery, setSearchQuery] = useState('')
-  const [selectedPlayerId, setSelectedPlayerId] = useState(null)
   const [isModalOpen, setIsModalOpen] = useState(false)
 
   const { players, loading, loadingMore, hasMore, searchPlayers, loadMore } = usePlayers()
   const { matches, fetchMatchesByPlayerId, clearMatches } = useMatches()
-
-  useEffect(() => {
-    searchPlayers('', null, 50, false)
-  }, [searchPlayers])
 
   useEffect(() => {
     const timer = setTimeout(() => {
@@ -31,7 +26,6 @@ function PlayerSearchPage() {
   }
 
   const handlePlayerClick = useCallback(async (playerId) => {
-    setSelectedPlayerId(playerId)
     await fetchMatchesByPlayerId(playerId)
     setIsModalOpen(true)
   }, [fetchMatchesByPlayerId])
@@ -39,7 +33,6 @@ function PlayerSearchPage() {
   const handleCloseModal = useCallback(() => {
     setIsModalOpen(false)
     clearMatches()
-    setSelectedPlayerId(null)
   }, [clearMatches])
 
   const playersList = useMemo(() => {
