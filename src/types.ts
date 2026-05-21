@@ -6,6 +6,7 @@ export interface Player {
   discriminator: string
   profileUrl: string
   matchesCount: number
+  hasStoredMatchesCount: boolean
 }
 
 export interface MatchSummary {

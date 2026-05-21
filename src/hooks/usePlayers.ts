@@ -23,9 +23,12 @@ const FAST_SEARCH_LIMIT = 50
 const FALLBACK_MIN_QUERY_LENGTH = 3
 const FALLBACK_PAGE_SIZE = 500
 const FALLBACK_SCAN_LIMIT = 5000
+const DEFAULT_SCAN_LIMIT = 5000
+const MATCH_PLAYERS_PAGE_SIZE = 1000
 const PREFIX_END = '\uf8ff'
 
-type PlayerCursor = QueryDocumentSnapshot<DocumentData> | null
+type PlayerCursor = QueryDocumentSnapshot<DocumentData> | number | null
+type MatchCountMap = Map<string, number>
 
 interface UsePlayersResult {
   players: Player[]
@@ -71,13 +74,76 @@ function getPlayerIdSource(searchQuery: string): string | null {
 
 function mapPlayerDoc(docSnapshot: DocumentSnapshot<DocumentData>): Player {
   const data = docSnapshot.data() as FirebasePlayerDocument | undefined
+  const hasStoredMatchesCount = typeof data?.matchesCount === 'number'
 
   return {
     id: data?.playerId || docSnapshot.id,
     nickname: data?.nickname || '',
     discriminator: data?.discriminator || '',
     profileUrl: data?.profileUrl || '',
-    matchesCount: data?.matchesCount || 0
+    matchesCount: hasStoredMatchesCount ? data.matchesCount || 0 : 0,
+    hasStoredMatchesCount
+  }
+}
+
+let matchCountCachePromise: Promise<MatchCountMap> | null = null
+
+async function fetchMatchCountMap(): Promise<MatchCountMap> {
+  const counts: MatchCountMap = new Map()
+  let lastVisibleDoc: QueryDocumentSnapshot<DocumentData> | null = null
+
+  while (true) {
+    const constraints: QueryConstraint[] = [orderBy('playerId'), limitQuery(MATCH_PLAYERS_PAGE_SIZE)]
+
+    if (lastVisibleDoc) {
+      constraints.splice(1, 0, startAfter(lastVisibleDoc))
+    }
+
+    const snapshot = await getDocs(query(collection(db, 'matchPlayers'), ...constraints))
+
+    for (const docSnapshot of snapshot.docs) {
+      const playerId = docSnapshot.data().playerId
+      if (typeof playerId === 'string' && playerId) {
+        counts.set(playerId, (counts.get(playerId) || 0) + 1)
+      }
+    }
+
+    if (snapshot.docs.length < MATCH_PLAYERS_PAGE_SIZE) {
+      break
+    }
+
+    lastVisibleDoc = snapshot.docs[snapshot.docs.length - 1] ?? null
+  }
+
+  return counts
+}
+
+function getMatchCountCache(): Promise<MatchCountMap> {
+  matchCountCachePromise ??= fetchMatchCountMap()
+  return matchCountCachePromise
+}
+
+async function hydrateMissingMatchesCounts(players: Player[]): Promise<Player[]> {
+  if (players.every((player) => player.hasStoredMatchesCount)) {
+    return players
+  }
+
+  try {
+    const counts = await getMatchCountCache()
+
+    return players.map((player) => {
+      if (player.hasStoredMatchesCount) {
+        return player
+      }
+
+      return {
+        ...player,
+        matchesCount: counts.get(player.id) || 0
+      }
+    })
+  } catch (error) {
+    console.warn('Failed to build match count cache:', error)
+    return players
   }
 }
 
@@ -130,6 +196,19 @@ function sortPlayers(players: Player[], searchQuery: string): Player[] {
   })
 }
 
+function sortPlayersByMatches(players: Player[]): Player[] {
+  return [...players].sort((a, b) => {
+    const matchesDifference = b.matchesCount - a.matchesCount
+    if (matchesDifference !== 0) return matchesDifference
+
+    return `${a.nickname}#${a.discriminator}`.localeCompare(
+      `${b.nickname}#${b.discriminator}`,
+      undefined,
+      { sensitivity: 'base' }
+    )
+  })
+}
+
 function dedupePlayers(players: Player[]): Player[] {
   const uniquePlayers = new Map<string, Player>()
 
@@ -156,7 +235,7 @@ async function fetchPlayersByPrefix(field: 'nickname' | 'discriminator', value: 
     )
   )
 
-  return snapshot.docs.map(mapPlayerDoc)
+  return hydrateMissingMatchesCounts(snapshot.docs.map(mapPlayerDoc))
 }
 
 async function fetchExactPlayer(searchQuery: string): Promise<Player[]> {
@@ -166,7 +245,7 @@ async function fetchExactPlayer(searchQuery: string): Promise<Player[]> {
   const playerId = await sha256Hex(playerIdSource)
   const snapshot = await getDoc(doc(db, 'players', playerId))
 
-  return snapshot.exists() ? [mapPlayerDoc(snapshot)] : []
+  return snapshot.exists() ? hydrateMissingMatchesCounts([mapPlayerDoc(snapshot)]) : []
 }
 
 async function fetchFallbackPlayers(searchQuery: string, resultLimit: number): Promise<Player[]> {
@@ -203,27 +282,32 @@ async function fetchFallbackPlayers(searchQuery: string, resultLimit: number): P
     }
   }
 
-  return players.slice(0, resultLimit)
+  return hydrateMissingMatchesCounts(players.slice(0, resultLimit))
 }
 
-async function fetchDefaultPlayers(afterCursor: PlayerCursor, resultLimit: number) {
-  const constraints: QueryConstraint[] = [
-    orderBy('matchesCount', 'desc'),
-    limitQuery(resultLimit)
-  ]
+async function fetchAllDefaultPlayers(): Promise<Player[]> {
+  const players: Player[] = []
+  let scannedCount = 0
+  let lastVisibleDoc: QueryDocumentSnapshot<DocumentData> | null = null
 
-  if (afterCursor) {
-    constraints.splice(1, 0, startAfter(afterCursor))
+  while (scannedCount < DEFAULT_SCAN_LIMIT) {
+    const constraints: QueryConstraint[] = [orderBy('nickname'), limitQuery(FALLBACK_PAGE_SIZE)]
+
+    if (lastVisibleDoc) {
+      constraints.splice(1, 0, startAfter(lastVisibleDoc))
+    }
+
+    const snapshot = await getDocs(query(collection(db, 'players'), ...constraints))
+    scannedCount += snapshot.docs.length
+    lastVisibleDoc = snapshot.docs[snapshot.docs.length - 1] ?? null
+    players.push(...snapshot.docs.map(mapPlayerDoc))
+
+    if (snapshot.docs.length < FALLBACK_PAGE_SIZE) {
+      break
+    }
   }
 
-  const snapshot = await getDocs(query(collection(db, 'players'), ...constraints))
-
-  return {
-    players: sortPlayers(snapshot.docs.map(mapPlayerDoc), ''),
-    nextCursor: snapshot.docs.length === resultLimit
-      ? snapshot.docs[snapshot.docs.length - 1] ?? null
-      : null
-  }
+  return sortPlayersByMatches(await hydrateMissingMatchesCounts(players))
 }
 
 async function fetchSearchPlayers(searchQuery: string, resultLimit: number): Promise<Player[]> {
@@ -259,6 +343,7 @@ export function usePlayers(): UsePlayersResult {
   const [error, setError] = useState<string | null>(null)
   const [currentSearch, setCurrentSearch] = useState('')
   const requestIdRef = useRef(0)
+  const defaultPlayersCacheRef = useRef<Player[] | null>(null)
 
   const searchPlayers = useCallback<UsePlayersResult['searchPlayers']>(async (
     searchQuery = '',
@@ -291,17 +376,21 @@ export function usePlayers(): UsePlayersResult {
         return
       }
 
-      const defaultResults = await fetchDefaultPlayers(afterCursor, resultLimit)
+      const offset = typeof afterCursor === 'number' ? afterCursor : 0
+      const sortedDefaultPlayers = defaultPlayersCacheRef.current ?? await fetchAllDefaultPlayers()
+      defaultPlayersCacheRef.current = sortedDefaultPlayers
+      const defaultPlayersPage = sortedDefaultPlayers.slice(offset, offset + resultLimit)
+      const nextDefaultOffset = offset + defaultPlayersPage.length
 
       if (requestId !== requestIdRef.current) return
 
       if (append) {
-        setPlayers((previousPlayers) => dedupePlayers([...previousPlayers, ...defaultResults.players]))
+        setPlayers((previousPlayers) => dedupePlayers([...previousPlayers, ...defaultPlayersPage]))
       } else {
-        setPlayers(defaultResults.players)
+        setPlayers(defaultPlayersPage)
       }
 
-      setNextCursor(defaultResults.nextCursor)
+      setNextCursor(nextDefaultOffset < sortedDefaultPlayers.length ? nextDefaultOffset : null)
     } catch (err) {
       if (requestId !== requestIdRef.current) return
 
