@@ -1,7 +1,14 @@
 import { formatDate } from '../utils/dateFormatter'
 import { getTeamName, getTeamColor } from '../utils/teamEnum'
+import type { MatchSummary } from '../types'
 
-function MatchModal({ isOpen, onClose, matches }) {
+interface MatchModalProps {
+  isOpen: boolean
+  onClose: () => void
+  matches: MatchSummary[]
+}
+
+function MatchModal({ isOpen, onClose, matches }: MatchModalProps) {
   if (!isOpen) return null
 
   return (
@@ -29,9 +36,9 @@ function MatchModal({ isOpen, onClose, matches }) {
             <p className="text-slate-400 text-center py-12 text-base sm:text-lg">No matches found.</p>
           ) : (
             <div className="space-y-4 sm:space-y-4">
-              {matches.map((match, index) => (
+              {matches.map((match) => (
                 <div
-                  key={index}
+                  key={match.matchUrl}
                   className="bg-white/5 border-l-4 border-purple-500 rounded-xl p-4 sm:p-5 hover:bg-white/10 transition-all duration-300"
                 >
                   <p className="text-slate-300 mb-3 text-base sm:text-base">

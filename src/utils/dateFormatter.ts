@@ -1,4 +1,4 @@
-export function formatDate(dateString) {
+export function formatDate(dateString: string | null): string {
   if (!dateString) return 'Date not specified'
 
   try {
@@ -8,7 +8,7 @@ export function formatDate(dateString) {
       return dateString
     }
 
-    const options = {
+    const options: Intl.DateTimeFormatOptions = {
       year: 'numeric',
       month: 'long',
       day: 'numeric',

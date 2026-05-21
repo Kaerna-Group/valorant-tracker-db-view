@@ -1,8 +1,11 @@
 import { useState, useEffect, useCallback, useMemo } from 'react'
+import type { KeyboardEvent, MouseEvent } from 'react'
 import { usePlayers } from '../hooks/usePlayers'
 import { useMatches } from '../hooks/useMatches'
 import PlayerCard from '../components/PlayerCard'
 import MatchModal from '../components/MatchModal'
+
+type SearchEvent = KeyboardEvent<HTMLInputElement> | MouseEvent<HTMLButtonElement>
 
 function PlayerSearchPage() {
   const [searchQuery, setSearchQuery] = useState('')
@@ -13,19 +16,19 @@ function PlayerSearchPage() {
 
   useEffect(() => {
     const timer = setTimeout(() => {
-      searchPlayers(searchQuery, null, 50, false)
+      void searchPlayers(searchQuery, null, 50, false)
     }, searchQuery ? 300 : 0)
 
     return () => clearTimeout(timer)
   }, [searchQuery, searchPlayers])
 
-  const handleSearch = (e) => {
-    if (e.key === 'Enter' || e.type === 'click') {
-      searchPlayers(searchQuery, null, 50, false)
+  const handleSearch = (event: SearchEvent) => {
+    if (event.type === 'click' || ('key' in event && event.key === 'Enter')) {
+      void searchPlayers(searchQuery, null, 50, false)
     }
   }
 
-  const handlePlayerClick = useCallback(async (playerId) => {
+  const handlePlayerClick = useCallback(async (playerId: string) => {
     await fetchMatchesByPlayerId(playerId)
     setIsModalOpen(true)
   }, [fetchMatchesByPlayerId])

@@ -3,9 +3,11 @@ export const Team = {
   TeamB: 1,
   Draw: 2,
   Unknown: 3
-}
+} as const
 
-export function getTeamName(teamValue) {
+type TeamValue = string | number | null | undefined
+
+export function getTeamName(teamValue: TeamValue): string {
   const numValue = typeof teamValue === 'string' ? parseInt(teamValue, 10) : teamValue
 
   switch (numValue) {
@@ -22,7 +24,7 @@ export function getTeamName(teamValue) {
   }
 }
 
-export function getTeamColor(teamValue) {
+export function getTeamColor(teamValue: TeamValue): string {
   const numValue = typeof teamValue === 'string' ? parseInt(teamValue, 10) : teamValue
 
   switch (numValue) {

@@ -1,6 +1,13 @@
 import { memo, useMemo } from 'react'
+import type { MouseEvent } from 'react'
+import type { Player } from '../types'
 
-function PlayerCard({ player, onCardClick }) {
+interface PlayerCardProps {
+  player: Player
+  onCardClick: (playerId: string) => void
+}
+
+function PlayerCard({ player, onCardClick }: PlayerCardProps) {
   const displayName = useMemo(() => {
     return `${player.nickname}${player.discriminator ? ` #${player.discriminator}` : ''}`
   }, [player.nickname, player.discriminator])
@@ -23,7 +30,7 @@ function PlayerCard({ player, onCardClick }) {
           href={player.profileUrl}
           target="_blank"
           rel="noopener noreferrer"
-          onClick={(e) => e.stopPropagation()}
+          onClick={(event: MouseEvent<HTMLAnchorElement>) => event.stopPropagation()}
           className="text-blue-400 hover:text-blue-300 font-semibold transition-colors text-base sm:text-base py-1"
         >
           Profile
